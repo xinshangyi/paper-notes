@@ -1,0 +1,171 @@
+
+
+# Abstract
+
+持续学习旨在按顺序学习任务，对旧学习样本的存储具有（通常很严格的）约束，而不会遭受灾难性的遗忘。
+
+本文提出了一种预见式的持续学习（一种新颖的设定，具体在introduction里会介绍对比）：一般传统的持续学习是在过去和现在的类别上评价模型，而本文还考虑了未来的类别【即没有任何训练样本】
+
+提出的是Ghost Model：一种想法来自于zero-shot learning的基于表征的模型【具体策略在第三个板块】
+
+
+
+# Introduction
+
+持续学习模型通过逐步处理一系列任务而与传统模型形成对比，由于它们可以保留的训练数据受到限制（通常很严格），因此这些模型必须避免灾难性地忘记过去的任务，同时还要接受新任务。
+
+一些不同类型方法避免遗忘：（以下方法都可以在文中找到一些论文链接，且他们往往是互补的）
+
+- 保留过去任务中的一部分训练数据
+- 学习生成训练数据
+- 为新任务扩展模型
+- 对每个任务都是用一个子网络
+- 限制模型发展中的差异
+
+**prescient continual learning这种new setting：**
+
+**目标：**在seen和unseen的类别上持续性学习
+
+在该模型中，模型不仅必须对当前和过去的任务表现良好，而且对于将来的任务也必须表现良好，既要避免灾难性的遗忘（对过去的课程使用数量有限的训练样本），又要对未来的课程给出最佳的估计（ 完全没有培训样本）。
+
+这个模型需要知道所有类别以及一些关于他们的先验知识：预先知道会遇到哪些标签，但各种标签的训练样本是增量式到达的。
+
+**对比：**
+
+- 《ICLR 2019 Selfless sequential learning》指出为未来的类别腾出空间的能力是当前持续学习模型的关键限制，并提出正则化损失以使模型更“无私”，从而在表示中明确保留了未来类别的能力。
+- 《ICLR 2020 Automatically discovering and learning new visual categories with ranking statistics》设置可以说与本文相反，它是假定所有类别的样本在最开始都存在，但是可用标签是增量到达的。
+
+**本文setting的解决方法：**
+
+Inspired by zero-shot learning【通过将视觉模型和具有关于类的知识的嵌入相结合，从而对未见过的类别里的样本分类】
+
+特别关注zero-shot learning中对未来类生成表征的方法：representation learning的框架可以无缝整合continual learning和zero-shot learning
+
+此外，会去使用ghost features（未来类的预测特征），在表示空间中给未来类别腾出空间
+
+以上目标通过一个精心构建了losses的简化模型实现。
+
+
+
+# Setting
+
+**关于测试评价的问题:**
+
+在持续学习中，一个分类器在多个steps被训练称作*tasks*
+
+传统上模型是在每个task $t$后，在所有目前可见的类别$C^{1:t}$上进行评价；
+
+而本文setting，each task的评价是在所有类别$C^{1:T}$上：past($C^{1:t-1}$), present($C^{t}$), and future($C^{t+1:T}$)
+
+
+
+
+
+# Ghost model
+
+模型包含三部分：一个卷积特征提取器$f$，一个特征生成器$g$，和一个分类器$clf$。
+
+卷积特征提取器$f$：模型的backbone，学习提取所有真实样本的特征
+
+特征生成器$g$：学习所有类的特征分布，旨在为未来的类生成合理的特征样本
+
+分类器$clf$：对所有类做最终的决定
+
+分类器利用从生成器中采样的特征（ghost features）进行未来类的训练（因为它们必须从可见的类和有关类的一些先验知识中被“半透明化”）
+
+## Base model for continual learning
+
+基础模型是给一个representation-based结构，有一个卷积特征提取器$\mathbf{h}=f(\mathbf{x})$和一个余弦分类器$clf$（把带有点乘的全连接层替换为余弦相似度）：
+$$
+c l f(\mathbf{h}, \boldsymbol{\theta})_{c}=\hat{\mathbf{y}}_{c}=\frac{\left\langle\mathbf{h}, \boldsymbol{\theta}_{c}\right\rangle}{\|\mathbf{h}\|_{2}\left\|\boldsymbol{\theta}_{c}\right\|_{2}}
+$$
+$\boldsymbol{\theta}_{c}$：是在$clf(c \in C^{1:t})$中，对于第$c$个类别的参数向量，可以被解释为类别$c$的代表representation或代理proxy。
+
+分类损失这里是用的NCA loss：
+$$
+\mathcal{L}_{\Theta_{f}, \Theta_{c l f}}^{\mathrm{nca}}=\left[-\log \frac{\exp \left(\hat{\mathbf{y}}_{y}-\delta\right)}{\sum_{c \neq y} \exp \hat{\mathbf{y}}_{c}}\right]_{+}
+$$
+为了防止灾难性遗忘，使用了经常在持续学习中使用的在过去模型迭代($t-1$)和当前($t$)的**蒸馏损失**，使得最终基础模型的loss为：
+$$
+\mathcal{L}=\mathcal{L}_{\Theta_{f}}^{\text {nca }}, \Theta_{c l f}+\lambda_{1} \mathcal{L}_{\Theta_{f}}^{\text {distil }}
+$$
+
+
+**NCA background：**
+
+度量学习 ( metric learning ) 研究如何在一个特定的任务上学习一个距离函数，使得该距离函数能够帮助基于近邻的算法 ( kNN、k-means 等 ) 取得较好的性能。深度度量学习 ( deep metric learning ) 是度量学习的一种方法，它的目标是学习一个从原始特征到低维稠密的向量空间 ( 称之为嵌入空间，embedding space ) 的映射，使得同类对象在嵌入空间上使用常用的距离函数 ( 欧氏距离、cosine 距离等 ) 计算的距离比较近，而不同类的对象之间的距离则比较远。
+
+其中的近邻成分分析（Neighborhood Component Analysis，简称NCA）loss：
+
+[深度度量学习中的损失函数](<https://cloud.tencent.com/developer/news/453123>)
+
+分子是在最大化相似度$\hat{\mathbf{y}}_y$（等价于最小化样本特征$\mathbf{h}_y$和正确的类别代理$\boldsymbol{\theta}_{y}$的距离），分母是在最小化相似度$\hat{\mathbf{y}}_c, \forall c \neq y$。**其实也就是缩小类内距离，扩大类间距离。**
+
+
+
+## Capacitating ghost model for future classes
+
+1. use prior information about the classes to generate ghost features, plausible stand-ins for the unseen future classes’ features
+2. adapt the classifier to incorporate those ghost features into the learning objective seamlessly
+
+### Generator
+
+生成模型直接根据未出现分类的特征（而不是输入图像）估计未出现分类的分布，然后需要把类别标签$c$映射到有语义意义的类别属性空间：进行映射的确切方法将取决于数据，但是最常见的是，要么我们有一组明确的属性链接到每个类（颜色，大小，材质，出处等），要么我们可以提取一个潜在的语义向量。
+
+**策略：**
+
+1. 在特征提取器已经学习的情况下训练生成器，然后在每个任务后进行fine-tune去解决分布移动。
+
+1. 然后让生成器利用看不见的类别的属性，从随机样本中伪造"ghost features"。
+
+该策略对于生成器模型是不可知的，只要它可以通过类属性来限制即可。
+
+实际生成器使用了Generative Moment Matching Network （ICML 2015）
+
+### Complete classifier
+
+$$
+\mathcal{L}_{\Theta_{f}, \Theta_{c l f}}^{\text {nca-ghost }}=\left[-\log \frac{\exp \left(\hat{\mathbf{y}}_{y}-\delta\right)}{\sum_{c \neq y} \exp \hat{\mathbf{y}}_{c}+\sum_{c \in C^{t+1: T}} \exp \hat{\mathbf{y}}_{c}}\right]_{+}
+$$
+
+未来类在分类损失中的加入有两个效应：
+
+- 允许模型在测试时执行zero-shot-like去猜测那些类别，让持续学习和zero-shot学习无缝结合
+- 对未来类的代理学习为这些类的表示空间腾出了空间，从而创建了有效的空白空间，这些空位推开了可见类别的实际特征（由于分母中的排他性项）。
+
+**Note：**ghost features在每个任务只被生成器创造一次，并且在任务持续时保持固定。
+
+
+
+## Latent-space regularization
+
+我们通过优化可见类的潜在表示来避免与Ghosts表示重叠，从而进一步促进类间分离。
+
+这个损失**直接**约束了特征空间且并不影响proxies和类内距离
+
+**Methods：**
+
+构建one-unseen-class-Vs-all-seen-classes SVM classifiers，对于每个看不见的类别都构建一个（使用线性核）
+
+目的就是将每个看不见的区域与大量可见特征分开。
+$$
+\mathcal{L}_{\Theta_{f}}^{\mathrm{svm}-\mathrm{reg}}=\frac{1}{N \times\left|C^{t+1: T}\right|} \sum_{i=1}^{N} \sum_{c \in C^{t+1: T}}\left[\mathbf{w}_{c} \cdot \mathbf{h}^{(i)}+b_{c}+\tau\right]_{+}
+$$
+其中，$[\cdot]_+$指代hinge loss，$\tau$指代一个额外的margin。
+
+这样的一个**基于边缘的正则化项**直接作用于潜在/特征空间以及创建它的特征提取器主干，而前面的loss在分类器上通过类代理的作用间接地调节了特征空间。
+
+
+
+## Complete strategy
+
+我们交替训练特征提取器（加分类器）和生成器。 我们训练后者模拟已看到的类的特征，然后要求其推断未见的类（ghost特征）。ghost features使我们既可以将可见和不可见的类统一为一个完整的分类器（$\mathcal{L}^{\text{nca-ghost}}$），又可以在特征空间中为不可见的类强制进行早期分配（$\mathcal{L}^{\text{svm-reg}}$）。
+
+complete loss：
+$$
+\mathcal{L}=\mathcal{L}_{\Theta_{f}, \Theta_{clf}}^{\text {nca-ghost }}+\lambda_{1} \mathcal{L}_{\Theta_{f}}^{\text {disill }}+\lambda_{2} \mathcal{L}_{\Theta_{f}}^{\text {svm-reg }}
+$$
+
+
+【算法图和流程图】
+
