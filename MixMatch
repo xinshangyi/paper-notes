@@ -1,0 +1,40 @@
+
+
+# Abstract 
+
+MixMatch, that guesses low-entropy labels for data-augmented unlabeled examples and mixes labeled and unlabeled data using MixUp.   
+
+最后进行消融研究，以弄清楚MixMatch的哪些成分对其成功最重要。
+
+
+
+# Introduction
+
+对于SSL的三种常用的loss term去使模型泛化性更强：
+
+- entropy minimization：基于一个假设，分类器的决策边界不应通过边缘数据分布的高密度区域。因此sharpen标签去输出低熵预测。
+- consistency regularization：通过利用分类器即使在扩展后也应为未标记的示例输出相同的类分布的思想，将data augmentation应用于半监督学习。
+- generic regularization：避免训练数据过拟合，本文中第一次将mixup用于ssl领域，作为labeled datapoints和unlabeled datapoints共同的正则器
+
+简而言之，MixMatch为未标记的数据引入了统一的损失项，可以无缝地减少熵，同时保持一致性并保持与传统正则化技术的兼容性。
+
+# MixMatch
+
+1. 循环，对一个Batch的标记数据和一个Batch的未标记数据（equally-sized batch）做数据增广，分别得到一个Batch的标记增广数据和K个Batch的未标记增广数据。（文章中K=2）
+2. 预测伪标签：将K个增广后的数据输入分类器，计算平均分类概率，应用温度Sharpen算法使伪标签熵小化。
+3. 将一个Batch的标记增广数据和K个Batch的未标记增广数据混合，**随机重排**得到$W$数据集。
+4. 将一个batch的标记增广数据和$W$的前一个batch利用mixup混合构成新的标记增广数据；再将K个batch的未标记增广数据和$W$剩下的数据利用mixup混合构成新的未标记增广数据。
+5. 对增广后的标记数据计算CE损失，对增广后的未标记数据计算$L_2$损失。【因为与交叉熵不同，它有界且对错误的预测不那么敏感。 因此，它通常用作SSL中未标记的数据丢失以及预测不确定性的量度】
+
+$$
+L_x = \frac{1}{|X'|}
+\\
+L_u = \frac{1}{L|U'|}
+\\
+$$
+
+其中$L$是分类类别个数。
+
+
+
+【插算法图】
